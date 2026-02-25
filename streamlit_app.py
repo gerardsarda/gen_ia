@@ -16,7 +16,7 @@ context, members = load_data()
 
 # Sidebar
 st.sidebar.header("Controles")
-dataset = st.sidebar.selectbox("Dataset", ["context", "members"]) 
+dataset = st.sidebar.selectbox("Dataset", ["context", "members"])
 show_n = st.sidebar.slider("Filas a mostrar", 5, 50, 10)
 
 df = context if dataset == "context" else members
@@ -27,12 +27,11 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.subheader("Tabla (muestra)")
     st.dataframe(df.head(show_n), use_container_width=True)
-    st.markdown(f"**Filas:** {df.shape[0]}  
-**Columnas:** {df.shape[1]}")
+    st.markdown(f"**Filas:** {df.shape[0]}  \n**Columnas:** {df.shape[1]}")
 
 with col2:
     st.subheader("Tipos y nulos")
-    dtypes = pd.DataFrame(df.dtypes, columns=["dtype"]) 
+    dtypes = pd.DataFrame(df.dtypes, columns=["dtype"])
     dtypes["n_null"] = df.isna().sum().values
     st.dataframe(dtypes, use_container_width=True)
 
@@ -56,7 +55,6 @@ else:
             ax.set_title(c)
         st.pyplot(fig)
 
-    # Correlation heatmap (if >1 numeric column)
     if num.shape[1] > 1:
         st.subheader("Mapa de correlación")
         corr = num.corr()
@@ -64,7 +62,7 @@ else:
         sns.heatmap(corr, annot=True, fmt='.2f', cmap='vlag', ax=ax2)
         st.pyplot(fig2)
 
-# Additional: quick aggregation example for members if present
+# Conteos rápidos para members
 if dataset == 'members':
     st.subheader('Conteos rápidos')
     for col in df.select_dtypes(include='object').columns[:3]:
@@ -76,4 +74,4 @@ st.sidebar.markdown("---")
 csv = df.to_csv(index=False).encode('utf-8')
 st.sidebar.download_button("Descargar CSV", data=csv, file_name=f"{dataset}.csv", mime='text/csv')
 
-st.sidebar.markdown("\n---\nGenerado con Streamlit")
+st.sidebar.markdown("---\nGenerado con Streamlit")
