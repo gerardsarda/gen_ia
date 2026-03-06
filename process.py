@@ -12,6 +12,7 @@ import pandas as pd
 import json
 import re
 import os
+import sqlite3
 from typing import Optional, Tuple, Dict, Any, List
 import traceback
 
@@ -35,6 +36,20 @@ try:
 except ImportError:
     PANDASQL_AVAILABLE = False
     print("Warning: pandasql not available. Please install with: pip install pandasql")
+
+# SQLite fallback (stdlib)
+try:
+    SQLITE_AVAILABLE = True
+except ImportError:
+    SQLITE_AVAILABLE = False
+    print("Warning: sqlite3 not available.")
+
+try:
+    import duckdb
+    DUCKDB_AVAILABLE = True
+except ImportError:
+    DUCKDB_AVAILABLE = False
+    print("Warning: duckdb not available. Please install with: pip install duckdb")
 
 # Visualization
 try:
@@ -292,7 +307,78 @@ def _extract_table_name_from_sql(sql: str) -> Optional[str]:
     return None
 
 
-def _call_llm(messages: List[Dict], api_key: Optional[str] = None, model: str = "gpt-4") -> str:
+def _adapt_sql_for_duckdb(sql: str) -> str:
+    """
+    Adapt common SQLite-style SQL snippets to DuckDB syntax.
+
+    Current adaptations:
+    - strftime('%m', col)  -> strftime(CAST(col AS TIMESTAMP), '%m')
+    """
+    def _swap_strftime_args(match: re.Match) -> str:
+        fmt = match.group("fmt")
+        value = match.group("value").strip()
+        if value.lower().startswith("cast("):
+            value_expr = value
+        else:
+            value_expr = f"CAST({value} AS TIMESTAMP)"
+        return f"strftime({value_expr}, {fmt})"
+
+    # SQLite signature: strftime(format, value)
+    # DuckDB signature: strftime(value, format)
+    pattern = re.compile(
+        r"strftime\(\s*(?P<fmt>'[^']*'|\"[^\"]*\")\s*,\s*(?P<value>[^)]+?)\s*\)",
+        re.IGNORECASE,
+    )
+    return pattern.sub(_swap_strftime_args, sql)
+
+
+def _parse_model_fallbacks_from_env() -> List[str]:
+    """Parse model fallbacks from OPENAI_MODEL_FALLBACKS env var."""
+    raw = os.getenv("OPENAI_MODEL_FALLBACKS", "")
+    if not raw:
+        return []
+    return [m.strip() for m in raw.split(",") if m.strip()]
+
+
+def _resolve_model_candidates(client: Any, requested_model: Optional[str]) -> List[str]:
+    """
+    Build an ordered list of model candidates.
+    If model listing is available, keep only models visible to the current project.
+    """
+    default_fallbacks = [
+        "gpt-4.1-mini",
+        "gpt-4o-mini",
+        "gpt-4o",
+        "gpt-4.1",
+        "o4-mini",
+    ]
+
+    requested = (requested_model or "").strip()
+    if requested.lower() == "auto":
+        requested = ""
+
+    candidates: List[str] = []
+    if requested:
+        candidates.append(requested)
+
+    for m in _parse_model_fallbacks_from_env() + default_fallbacks:
+        if m and m not in candidates:
+            candidates.append(m)
+
+    try:
+        listed = client.models.list()
+        available = {m.id for m in listed.data if getattr(m, "id", None)}
+        filtered = [m for m in candidates if m in available]
+        if filtered:
+            return filtered
+    except Exception:
+        # If listing models fails, continue with static candidates.
+        pass
+
+    return candidates
+
+
+def _call_llm(messages: List[Dict], api_key: Optional[str] = None, model: str = "gpt-4o-mini") -> str:
     """
     Call LLM provider to generate response.
     
@@ -313,14 +399,33 @@ def _call_llm(messages: List[Dict], api_key: Optional[str] = None, model: str = 
                 raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable or use config.py")
     
     client = openai.OpenAI(api_key=api_key)
-    
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0.1  # Lower temperature for more consistent SQL generation
+    model_candidates = _resolve_model_candidates(client, model)
+
+    last_error = None
+    for model_name in model_candidates:
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=0.1  # Lower temperature for more consistent SQL generation
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            last_error = e
+            err = str(e)
+            is_model_access_error = (
+                "model_not_found" in err
+                or "does not have access to model" in err
+                or "invalid model" in err.lower()
+            )
+            if is_model_access_error:
+                continue
+            raise
+
+    raise ValueError(
+        "No accessible model found for this OpenAI project. "
+        f"Tried models: {', '.join(model_candidates)}. Last error: {last_error}"
     )
-    
-    return response.choices[0].message.content
 
 
 def _create_rag_context(question: str, golden_dataset: List[Dict], max_examples: int = 5) -> str:
@@ -388,7 +493,7 @@ def generate_sql(
     dfs: Optional[Dict[str, pd.DataFrame]] = None,
     level: int = 3,
     api_key: Optional[str] = None,
-    model: str = "gpt-4",
+    model: str = "gpt-4o-mini",
     golden_dataset_path: Optional[str] = None,
     negative_examples: Optional[List[Dict[str, str]]] = None
 ) -> str:
@@ -407,7 +512,7 @@ def generate_sql(
             - Level 3: Pass schema + semantics (description of tables and fields for both tables)
             - Level 4: Pass schema + semantics + golden dataset (table names from examples)
         api_key: OpenAI API key (optional, uses config or env var if not provided)
-        model: LLM model to use (default: gpt-4)
+        model: LLM model to use (default: gpt-4o-mini)
         golden_dataset_path: Path to golden dataset JSON file (for level 4)
         negative_examples: Optional list of dicts with 'question' and 'sql' keys for incorrect examples
     
@@ -524,8 +629,11 @@ def run_query(
         If successful: (DataFrame, None)
         If error: (None, error_message)
     """
-    if not PANDASQL_AVAILABLE:
-        return None, "pandasql library not available. Please install it with: pip install pandasql"
+    if not PANDASQL_AVAILABLE and not SQLITE_AVAILABLE and not DUCKDB_AVAILABLE:
+        return None, (
+            "No SQL engine available. Install one of: "
+            "pip install pandasql or pip install duckdb"
+        )
     
     # Determine which DataFrames to use
     if dfs is not None:
@@ -573,7 +681,25 @@ def run_query(
             dfs_for_sql[table_name_key] = df_for_sql
         
         # Execute SQL with all tables available
-        result = sqldf(sql, dfs_for_sql)
+        if PANDASQL_AVAILABLE:
+            result = sqldf(sql, dfs_for_sql)
+        elif SQLITE_AVAILABLE:
+            conn = sqlite3.connect(':memory:')
+            try:
+                for table_name_key, df_table in dfs_for_sql.items():
+                    df_table.to_sql(table_name_key, conn, index=False, if_exists='replace')
+                result = pd.read_sql_query(sql, conn)
+            finally:
+                conn.close()
+        else:
+            conn = duckdb.connect(database=':memory:')
+            try:
+                for table_name_key, df_table in dfs_for_sql.items():
+                    conn.register(table_name_key, df_table)
+                sql_duckdb = _adapt_sql_for_duckdb(sql)
+                result = conn.execute(sql_duckdb).df()
+            finally:
+                conn.close()
         
         # Convert result to DataFrame
         if isinstance(result, pd.DataFrame):
@@ -596,7 +722,7 @@ def explain_results(
     sql: str,
     results_df: pd.DataFrame,
     api_key: Optional[str] = None,
-    model: str = "gpt-4"
+    model: str = "gpt-4o-mini"
 ) -> str:
     """
     Explain query results in business-friendly language for stakeholders.
@@ -606,7 +732,7 @@ def explain_results(
         sql: SQL query that was executed
         results_df: DataFrame with query results
         api_key: OpenAI API key (optional)
-        model: LLM model to use (default: gpt-4)
+        model: LLM model to use (default: gpt-4o-mini)
     
     Returns:
         Business-friendly explanation of the results
@@ -691,69 +817,109 @@ def add_visualization(
         print("Warning: No columns in results, cannot create visualization.")
         return None
     
+    df_plot = results_df.copy()
+
     # Determine data types
-    numeric_cols = results_df.select_dtypes(include=['number']).columns.tolist()
-    categorical_cols = results_df.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
-    datetime_cols = [col for col in results_df.columns if pd.api.types.is_datetime64_any_dtype(results_df[col])]
-    
-    # If we have a date-like column (month, date, etc.), treat it as datetime
-    date_like_cols = [col for col in results_df.columns if any(keyword in col.lower() for keyword in ['date', 'month', 'year', 'time', 'period'])]
-    
+    numeric_cols = df_plot.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df_plot.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
+    datetime_cols = [col for col in df_plot.columns if pd.api.types.is_datetime64_any_dtype(df_plot[col])]
+    date_like_cols = [
+        col for col in df_plot.columns
+        if any(keyword in col.lower() for keyword in ['date', 'month', 'year', 'time', 'period'])
+    ]
+
+    # Try to coerce date-like text columns to datetime for proper sorting/plotting
+    for col in date_like_cols:
+        if col in datetime_cols:
+            continue
+        try:
+            converted = pd.to_datetime(df_plot[col], errors='coerce')
+            # Only keep conversion if most values are parseable
+            if converted.notna().sum() >= max(3, int(len(df_plot) * 0.7)):
+                df_plot[col] = converted
+                datetime_cols.append(col)
+        except Exception:
+            pass
+
     # Determine chart type if not specified
     if chart_type is None:
-        if len(results_df.columns) == 1:
-            col = results_df.columns[0]
-            if col in numeric_cols:
-                chart_type = 'histogram'
-            elif col in categorical_cols or col in date_like_cols:
-                chart_type = 'bar'
-            else:
-                chart_type = 'bar'
-        elif len(results_df.columns) == 2:
-            col1, col2 = results_df.columns[0], results_df.columns[1]
-            # Check if one is date/time
-            if col1 in datetime_cols or col1 in date_like_cols:
-                chart_type = 'line'
-            elif col2 in datetime_cols or col2 in date_like_cols:
-                chart_type = 'line'
-            # Check if one is categorical and one is numeric
-            elif (col1 in categorical_cols and col2 in numeric_cols) or (col2 in categorical_cols and col1 in numeric_cols):
-                chart_type = 'bar'
-            else:
-                chart_type = 'scatter'
+        if len(df_plot.columns) == 1:
+            chart_type = 'histogram' if df_plot.columns[0] in numeric_cols else 'bar'
+        elif any(col in datetime_cols for col in df_plot.columns) and len(numeric_cols) >= 1:
+            chart_type = 'line'
+        elif len(numeric_cols) >= 1 and len(categorical_cols) >= 1:
+            chart_type = 'bar'
+        elif len(numeric_cols) >= 2:
+            chart_type = 'scatter'
         else:
-            # Multiple columns - try to find date column for line chart
-            if any(col in datetime_cols or col in date_like_cols for col in results_df.columns):
-                chart_type = 'line'
-            elif len(numeric_cols) >= 2:
-                chart_type = 'scatter'
-            else:
-                chart_type = 'bar'
-    
-    # Create visualization based on type
+            chart_type = 'bar'
+
     title = question if question else "Query Results"
-    
+
     try:
         if chart_type == 'histogram':
-            if len(numeric_cols) > 0:
+            if numeric_cols:
+                num_col = numeric_cols[0]
                 fig = px.histogram(
-                    results_df,
-                    x=numeric_cols[0],
+                    df_plot,
+                    x=num_col,
                     title=title,
-                    labels={numeric_cols[0]: numeric_cols[0].replace('_', ' ').title()}
+                    labels={num_col: num_col.replace('_', ' ').title()}
                 )
                 fig.update_layout(
-                    xaxis_title=numeric_cols[0].replace('_', ' ').title(),
+                    xaxis_title=num_col.replace('_', ' ').title(),
                     yaxis_title="Frequency",
                     template="plotly_white"
                 )
                 return fig
-        
+
         elif chart_type == 'bar':
-            if len(categorical_cols) > 0:
-                # Bar chart of categorical values
+            if numeric_cols and categorical_cols:
+                num_col = numeric_cols[0]
+                non_date_cats = [c for c in categorical_cols if c not in date_like_cols]
+                x_col = non_date_cats[0] if non_date_cats else categorical_cols[0]
+                color_candidates = [c for c in categorical_cols if c != x_col]
+                color_col = None
+                if color_candidates:
+                    candidate = color_candidates[0]
+                    if df_plot[candidate].nunique(dropna=False) <= 20:
+                        color_col = candidate
+
+                group_cols = [x_col] + ([color_col] if color_col else [])
+                bar_df = df_plot.groupby(group_cols, as_index=False)[num_col].sum()
+
+                if color_col:
+                    fig = px.bar(
+                        bar_df,
+                        x=x_col,
+                        y=num_col,
+                        color=color_col,
+                        barmode='group',
+                        title=title,
+                        labels={
+                            x_col: x_col.replace('_', ' ').title(),
+                            num_col: num_col.replace('_', ' ').title(),
+                            color_col: color_col.replace('_', ' ').title(),
+                        }
+                    )
+                else:
+                    bar_df = bar_df.sort_values(num_col, ascending=False).head(30)
+                    fig = px.bar(
+                        bar_df,
+                        x=x_col,
+                        y=num_col,
+                        title=title,
+                        labels={
+                            x_col: x_col.replace('_', ' ').title(),
+                            num_col: num_col.replace('_', ' ').title(),
+                        }
+                    )
+                fig.update_layout(template="plotly_white")
+                return fig
+
+            if categorical_cols:
                 value_col = categorical_cols[0]
-                value_counts = results_df[value_col].value_counts().head(20)  # Limit to top 20
+                value_counts = df_plot[value_col].value_counts().head(20)
                 fig = go.Figure(data=[
                     go.Bar(
                         x=value_counts.index,
@@ -768,68 +934,100 @@ def add_visualization(
                     template="plotly_white"
                 )
                 return fig
-            elif len(results_df.columns) == 2:
-                # Grouped bar chart: categorical x, numeric y
-                cat_col = categorical_cols[0] if categorical_cols else results_df.columns[0]
-                num_col = numeric_cols[0] if numeric_cols else results_df.columns[1]
-                
-                fig = px.bar(
-                    results_df,
-                    x=cat_col,
-                    y=num_col,
-                    title=title,
-                    labels={
-                        cat_col: cat_col.replace('_', ' ').title(),
-                        num_col: num_col.replace('_', ' ').title()
-                    }
-                )
-                fig.update_layout(
-                    template="plotly_white",
-                    xaxis_title=cat_col.replace('_', ' ').title(),
-                    yaxis_title=num_col.replace('_', ' ').title()
-                )
-                return fig
-        
+
         elif chart_type == 'line':
-            # Line chart for time series
             date_col = None
-            for col in results_df.columns:
-                if col in datetime_cols or col in date_like_cols:
+            for col in df_plot.columns:
+                if col in datetime_cols:
                     date_col = col
                     break
-            
-            if date_col:
-                # Use date column as x-axis
-                numeric_col = numeric_cols[0] if numeric_cols else [c for c in results_df.columns if c != date_col][0]
-                fig = px.line(
-                    results_df,
-                    x=date_col,
-                    y=numeric_col,
-                    title=title,
-                    labels={
-                        date_col: date_col.replace('_', ' ').title(),
-                        numeric_col: numeric_col.replace('_', ' ').title()
-                    }
-                )
-            else:
-                # Use first column as x, second as y
-                fig = px.line(
-                    results_df,
-                    x=results_df.columns[0],
-                    y=results_df.columns[1],
-                    title=title
-                )
-            
-            fig.update_layout(
-                template="plotly_white",
-                hovermode='x unified'
-            )
-            return fig
-        
+            if date_col is None:
+                for col in df_plot.columns:
+                    if col in date_like_cols:
+                        date_col = col
+                        break
+
+            if date_col and numeric_cols:
+                num_col = numeric_cols[0]
+
+                # Use non-numeric dimensions to split lines, avoiding zig-zag mixed series.
+                group_dims = [
+                    c for c in df_plot.columns
+                    if c not in {date_col, num_col} and c not in numeric_cols
+                ]
+                line_df = df_plot.copy()
+                for c in group_dims:
+                    line_df[c] = line_df[c].astype(str)
+
+                group_cols = [date_col] + group_dims
+                line_df = line_df.groupby(group_cols, as_index=False)[num_col].sum()
+                line_df = line_df.sort_values(group_cols)
+
+                if not group_dims:
+                    fig = px.line(
+                        line_df,
+                        x=date_col,
+                        y=num_col,
+                        title=title,
+                        labels={
+                            date_col: date_col.replace('_', ' ').title(),
+                            num_col: num_col.replace('_', ' ').title()
+                        }
+                    )
+                elif len(group_dims) == 1 and line_df[group_dims[0]].nunique(dropna=False) <= 20:
+                    fig = px.line(
+                        line_df,
+                        x=date_col,
+                        y=num_col,
+                        color=group_dims[0],
+                        title=title,
+                        labels={
+                            date_col: date_col.replace('_', ' ').title(),
+                            num_col: num_col.replace('_', ' ').title(),
+                            group_dims[0]: group_dims[0].replace('_', ' ').title(),
+                        }
+                    )
+                else:
+                    line_df['_series'] = line_df[group_dims].agg(' | '.join, axis=1)
+                    if line_df['_series'].nunique(dropna=False) <= 20:
+                        fig = px.line(
+                            line_df,
+                            x=date_col,
+                            y=num_col,
+                            color='_series',
+                            title=title,
+                            labels={
+                                date_col: date_col.replace('_', ' ').title(),
+                                num_col: num_col.replace('_', ' ').title(),
+                                '_series': "Series",
+                            }
+                        )
+                    else:
+                        # Too many series: aggregate over dimensions for readability.
+                        agg_df = line_df.groupby(date_col, as_index=False)[num_col].sum()
+                        fig = px.line(
+                            agg_df,
+                            x=date_col,
+                            y=num_col,
+                            title=f"{title} (aggregated)",
+                            labels={
+                                date_col: date_col.replace('_', ' ').title(),
+                                num_col: num_col.replace('_', ' ').title()
+                            }
+                        )
+                fig.update_layout(template="plotly_white", hovermode='x unified')
+                fig.update_traces(mode='lines+markers')
+                return fig
+
+            if len(df_plot.columns) >= 2:
+                fig = px.line(df_plot, x=df_plot.columns[0], y=df_plot.columns[1], title=title)
+                fig.update_layout(template="plotly_white", hovermode='x unified')
+                return fig
+
         elif chart_type == 'scatter':
             if len(numeric_cols) >= 2:
                 fig = px.scatter(
-                    results_df,
+                    df_plot,
                     x=numeric_cols[0],
                     y=numeric_cols[1],
                     title=title,
@@ -840,11 +1038,10 @@ def add_visualization(
                 )
                 fig.update_layout(template="plotly_white")
                 return fig
-        
-        # Default: table view
+
         print("Warning: Could not determine appropriate chart type. Consider specifying chart_type.")
         return None
-        
+
     except Exception as e:
         print(f"Error creating visualization: {e}\n{traceback.format_exc()}")
         return None

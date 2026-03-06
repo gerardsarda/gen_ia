@@ -30,5 +30,133 @@
     "is_ok": 0,
     "chat_type": "type_3",
     "timestamp": "2026-03-03T19:18:59.456718"
+  },
+  {
+    "question": "*How many active members are there?** (Current period, by center, by plan)",
+    "sql_code": "WITH latest_month AS (\n    SELECT MAX(month) AS month FROM fitlife_members\n)\nSELECT \n    center,\n    plan,\n    COUNT(member_id) AS active_members\nFROM \n    fitlife_members\nJOIN \n    latest_month ON fitlife_members.month = latest_month.month\nWHERE \n    status = 'active'\nGROUP BY \n    center, plan;",
+    "is_ok": 1,
+    "timestamp": "2026-03-04T20:56:32.055130",
+    "answer": "Query executed successfully.\n\nBusiness explanation:\nThe data shows the number of active members at each FitLife center, broken down by membership plan, for the most recent month available. In total, there are 15 different center-plan combinations reported.\n\nKey insights include:\n\n- The average number of active members per center-plan is about 35, with some variation ranging from as low as 12 members to as high as 59 members.\n- Premium and family plans tend to have higher active membership counts, with some centers like Eastpark and Northside showing strong engagement in these plans.\n- Basic plans generally have fewer active members compared to premium and family plans, but they still represent a significant portion of the membership base across centers.\n\nFrom a business perspective, this information highlights where membership is strongest and where there may be opportunities to grow. Centers with lower active membership in certain plans might benefit from targeted marketing or promotional efforts to boost engagement. Additionally, the popularity of premium and family plans suggests these offerings are valuable to members and could be further emphasized in sales strategies.\n\nOverall, maintaining and increasing active membership across all centers and plans will be critical for sustaining revenue and growth. This data provides a clear snapshot of current performance and helps identify focus areas for member retention and acquisition.",
+    "level": 4
+  },
+  {
+    "question": "\u00bfCu\u00e1ntos miembros nuevos se han registrado en los \u00faltimos 3 meses?",
+    "sql_code": "WITH latest_month AS (\n    SELECT MAX(month) AS month FROM fitlife_members\n),\nlast_3_months AS (\n    SELECT DISTINCT \n        date(substr(month, 1, 7) || '-01') AS month_date\n    FROM fitlife_members\n    WHERE month >= date((SELECT month FROM latest_month) || '-01', '-2 months')\n)\nSELECT \n    COUNT(DISTINCT member_id) AS new_members_last_3_months\nFROM \n    fitlife_members\nWHERE \n    signup_date >= date((SELECT month FROM latest_month) || '-01', '-2 months')\n    AND signup_date < date((SELECT month FROM latest_month) || '-01', '+1 month');",
+    "is_ok": 0,
+    "timestamp": "2026-03-04T20:59:05.433236",
+    "answer": "Could not run query. Error: `Error executing SQL: Parser Error: Wrong number of arguments provided to DATE function\nTraceback (most recent call last):\n  File \"C:\\Users\\gerar\\Downloads\\gen_ia\\gen_ia\\process.py\", line 658, in run_query\n    result = conn.execute(sql).df()\n             ~~~~~~~~~~~~^^^^^\n_duckdb.ParserException: Parser Error: Wrong number of arguments provided to DATE function\n`",
+    "level": 4
+  },
+  {
+    "question": "\"How many new members joined in the last 3 months?",
+    "sql_code": "WITH latest_month AS (\n    SELECT MAX(month) AS month FROM fitlife_members\n),\nlast_3_months AS (\n    SELECT DISTINCT \n        date(substr(month, 1, 7) || '-01') AS month_date\n    FROM fitlife_members\n    WHERE month >= date((SELECT month FROM latest_month) || '-01', '-2 months')\n)\nSELECT \n    COUNT(DISTINCT member_id) AS new_members_last_3_months\nFROM \n    fitlife_members\nWHERE \n    signup_date >= date((SELECT month FROM latest_month) || '-01', '-2 months')\n    AND signup_date <= date((SELECT month FROM latest_month) || '-01', '+1 month', '-1 day');",
+    "is_ok": 0,
+    "timestamp": "2026-03-04T21:02:12.307355",
+    "answer": "Could not run query. Error: `Error executing SQL: Parser Error: Wrong number of arguments provided to DATE function\nTraceback (most recent call last):\n  File \"C:\\Users\\gerar\\Downloads\\gen_ia\\gen_ia\\process.py\", line 658, in run_query\n    result = conn.execute(sql).df()\n             ~~~~~~~~~~~~^^^^^\n_duckdb.ParserException: Parser Error: Wrong number of arguments provided to DATE function\n`",
+    "level": 4
+  },
+  {
+    "question": "\"List the top 10 members with the lowest activity levels this month so we can send them a promotion.\"",
+    "sql_code": "WITH latest_month AS (\n    SELECT MAX(month) AS month FROM fitlife_members\n)\nSELECT \n    member_id,\n    visits_this_month\nFROM \n    fitlife_members\nJOIN \n    latest_month ON fitlife_members.month = latest_month.month\nORDER BY \n    visits_this_month ASC\nLIMIT 10;",
+    "is_ok": 1,
+    "timestamp": "2026-03-04T21:04:47.681680",
+    "answer": "Query executed successfully.\n\nBusiness explanation:\nThe data identifies the 10 members with the lowest activity levels in the most recent month, measured by the number of visits to our facility. These members had between 0 and 2 visits, with an average of less than 1 visit per member. Notably, two members did not visit at all during this period.\n\nFrom a business perspective, these members represent a key opportunity for targeted engagement. Since their activity is very low, they may be at risk of disengaging or canceling their membership. By proactively reaching out with a promotion or incentive, we can encourage them to increase their visits, which can improve retention and overall revenue.\n\nIn summary, focusing marketing efforts on this small group of low-activity members could help boost their participation and strengthen their loyalty to our brand. This targeted approach is likely more cost-effective than broad campaigns and can have a meaningful impact on member retention.",
+    "level": 4
+  },
+  {
+    "question": "\"What was the total attendance for all classes last month?\"",
+    "sql_code": "WITH latest_month AS (\n    SELECT MAX(month) AS month FROM fitlife_members\n),\nlast_month AS (\n    SELECT \n        DATE(substr(month, 1, 4) || '-' || substr(month, 6, 2) || '-01', '-1 month') AS month_date\n    FROM latest_month\n)\nSELECT \n    SUM(group_classes_attended) AS total_attendance_last_month\nFROM \n    fitlife_members\nJOIN \n    last_month ON fitlife_members.month = strftime('%Y-%m', last_month.month_date);",
+    "is_ok": 0,
+    "timestamp": "2026-03-04T21:05:52.689525",
+    "answer": "Could not run query. Error: `Error executing SQL: Parser Error: Wrong number of arguments provided to DATE function\nTraceback (most recent call last):\n  File \"C:\\Users\\gerar\\Downloads\\gen_ia\\gen_ia\\process.py\", line 658, in run_query\n    result = conn.execute(sql).df()\n             ~~~~~~~~~~~~^^^^^\n_duckdb.ParserException: Parser Error: Wrong number of arguments provided to DATE function\n`",
+    "level": 4
+  },
+  {
+    "question": "\"What was the total attendance for all classes last month?\"",
+    "sql_code": "WITH latest_month AS (\n    SELECT MAX(month) AS month FROM fitlife_members\n),\nlast_month AS (\n    SELECT DATE(substr(month, 1, 4) || '-' || substr(month, 6, 2) || '-01', '-1 month') AS month_date\n    FROM latest_month\n)\nSELECT \n    SUM(group_classes_attended) AS total_attendance_last_month\nFROM \n    fitlife_members\nJOIN \n    last_month ON fitlife_members.month = strftime('%Y-%m', last_month.month_date);",
+    "is_ok": 0,
+    "timestamp": "2026-03-04T21:06:01.829863",
+    "answer": "Could not run query. Error: `Error executing SQL: Parser Error: Wrong number of arguments provided to DATE function\nTraceback (most recent call last):\n  File \"C:\\Users\\gerar\\Downloads\\gen_ia\\gen_ia\\process.py\", line 658, in run_query\n    result = conn.execute(sql).df()\n             ~~~~~~~~~~~~^^^^^\n_duckdb.ParserException: Parser Error: Wrong number of arguments provided to DATE function\n`",
+    "level": 4
+  },
+  {
+    "question": "\"Which specific gym class had the most attendees in the last 30 days?\"",
+    "sql_code": "WITH latest_month AS (\n    SELECT MAX(month) AS month FROM fitlife_members\n),\nlast_30_days AS (\n    SELECT \n        member_id,\n        month,\n        group_classes_attended\n    FROM \n        fitlife_members\n    WHERE \n        month >= date((SELECT month FROM latest_month) || '-01', '-1 month')\n        AND month <= (SELECT month FROM latest_month)\n)\nSELECT \n    'group_classes' AS gym_class,\n    SUM(group_classes_attended) AS total_attendees\nFROM \n    last_30_days\nGROUP BY \n    gym_class\nORDER BY \n    total_attendees DESC\nLIMIT 1;",
+    "is_ok": 0,
+    "timestamp": "2026-03-04T21:06:31.532574",
+    "answer": "Could not run query. Error: `Error executing SQL: Parser Error: Wrong number of arguments provided to DATE function\nTraceback (most recent call last):\n  File \"C:\\Users\\gerar\\Downloads\\gen_ia\\gen_ia\\process.py\", line 658, in run_query\n    result = conn.execute(sql).df()\n             ~~~~~~~~~~~~^^^^^\n_duckdb.ParserException: Parser Error: Wrong number of arguments provided to DATE function\n`",
+    "level": 4
+  },
+  {
+    "question": "\"What is the most frequent 'churn_reason' for members in the 'Premium' plan compared to the 'Basic' plan?\"",
+    "sql_code": "SELECT \n    plan,\n    churn_reason,\n    COUNT(*) AS reason_count\nFROM \n    fitlife_members\nWHERE \n    plan IN ('Premium', 'Basic')\n    AND status = 'churned'\n    AND churn_reason IS NOT NULL\nGROUP BY \n    plan, churn_reason\nORDER BY \n    plan,\n    reason_count DESC;",
+    "is_ok": 0,
+    "timestamp": "2026-03-04T21:11:38.457614",
+    "answer": "Query executed successfully.\n\nBusiness explanation:\nThe data query returned no results, which means there are no recorded cases of members who have churned (canceled their membership) from either the Premium or Basic plans with a documented reason for leaving.\n\nFrom a business perspective, this could indicate one of two things:\n\n1. **No Churn or No Recorded Reasons:** Either no members on these plans have recently canceled their memberships, or if they have, the reasons for their departure were not captured in the system.\n\n2. **Data Collection Gap:** There may be an issue with how churn reasons are being recorded or stored, leading to missing information.\n\nFor the business, this means we currently lack insight into why members on Premium and Basic plans leave. Without this information, it\u2019s challenging to identify specific issues or opportunities to improve retention for these plans. The next step would be to review data collection processes to ensure churn reasons are properly captured, enabling more informed decision-making in the future.",
+    "level": 4
+  },
+  {
+    "question": "\"What is the average tenure ('tenure_months') of members who have a personal trainer versus those who don't?\"",
+    "sql_code": "SELECT \n    has_personal_trainer,\n    AVG(tenure_months) AS avg_tenure_months\nFROM \n    fitlife_members\nGROUP BY \n    has_personal_trainer;",
+    "is_ok": 1,
+    "timestamp": "2026-03-04T21:14:04.657719",
+    "answer": "Query executed successfully.\n\nBusiness explanation:\nThe data shows that members who have a personal trainer tend to stay with the gym longer than those who do not. Specifically, members with a personal trainer have an average membership duration of about 17.8 months, while those without a trainer average around 16.4 months.\n\nFrom a business perspective, this suggests that offering personal training services may help improve member retention. Encouraging more members to use personal trainers could lead to longer memberships, which typically translates into more stable and increased revenue over time. This insight supports investing in or promoting personal training programs as a strategy to boost customer loyalty and lifetime value.",
+    "level": 4
+  },
+  {
+    "question": "okey so more than 15 classes",
+    "sql_code": "SELECT \n    COUNT(*) AS members_with_more_than_15_classes\nFROM \n    fitlife_members\nWHERE \n    group_classes_attended > 15;",
+    "is_ok": 0,
+    "timestamp": "2026-03-04T21:15:28.188865",
+    "answer": "Query executed successfully.\n\nBusiness explanation:\nThe data shows that currently, there are no members who have attended more than 15 group classes. This indicates that either members are not engaging heavily with group classes or the threshold of 15 classes is quite high relative to typical member behavior.\n\nFrom a business perspective, this suggests an opportunity to encourage greater participation in group classes, which could improve member retention and increase revenue. It may also be worth reviewing the class offerings, scheduling, or marketing efforts to better motivate members to attend more frequently. Overall, the lack of high-frequency attendees highlights a potential area for growth in member engagement.",
+    "level": 4
+  },
+  {
+    "question": "\"What is the average 'tenure_months' for members who signed up in January? Compare it with the average tenure of other months",
+    "sql_code": "SELECT \n    CASE \n        WHEN strftime('%m', signup_date) = '01' THEN 'January'\n        ELSE 'Other Months'\n    END AS signup_month_group,\n    AVG(tenure_months) AS avg_tenure_months\nFROM \n    fitlife_members\nGROUP BY \n    signup_month_group;",
+    "is_ok": 0,
+    "timestamp": "2026-03-04T21:21:04.960008",
+    "answer": "Could not run query. Error: `Error executing SQL: Binder Error: Could not choose a best candidate function for the function call \"strftime(STRING_LITERAL, VARCHAR)\". In order to select one, please add explicit type casts.\n\tCandidate functions:\n\tstrftime(TIMESTAMP, VARCHAR) -> VARCHAR\n\tstrftime(TIMESTAMP_NS, VARCHAR) -> VARCHAR\n\tstrftime(TIMESTAMP WITH TIME ZONE, VARCHAR) -> VARCHAR\n\tstrftime(DATE, VARCHAR) -> VARCHAR\n\n\nLINE 3:         WHEN strftime('%m', signup_date) = '01' THEN 'January'\n                     ^\nTraceback (most recent call last):\n  File \"C:\\Users\\gerar\\Downloads\\gen_ia\\gen_ia\\process.py\", line 658, in run_query\n    result = conn.execute(sql).df()\n             ~~~~~~~~~~~~^^^^^\n_duckdb.BinderException: Binder Error: Could not choose a best candidate function for the function call \"strftime(STRING_LITERAL, VARCHAR)\". In order to select one, please add explicit type casts.\n\tCandidate functions:\n\tstrftime(TIMESTAMP, VARCHAR) -> VARCHAR\n\tstrftime(TIMESTAMP_NS, VARCHAR) -> VARCHAR\n\tstrftime(TIMESTAMP WITH TIME ZONE, VARCHAR) -> VARCHAR\n\tstrftime(DATE, VARCHAR) -> VARCHAR\n\n\nLINE 3:         WHEN strftime('%m', signup_date) = '01' THEN 'January'\n                     ^\n`",
+    "level": 4
+  },
+  {
+    "question": "which are the top 3 acquisition channel ",
+    "sql_code": "SELECT \n    acquisition_channel,\n    COUNT(DISTINCT member_id) AS total_members\nFROM \n    fitlife_members\nGROUP BY \n    acquisition_channel\nORDER BY \n    total_members DESC\nLIMIT 3;",
+    "is_ok": 1,
+    "timestamp": "2026-03-04T21:21:08.909804",
+    "answer": "Query executed successfully.\n\nBusiness explanation:\nThe data reveals that the top three channels bringing in new members to FitLife are walk-ins, referrals, and digital marketing. Specifically, walk-ins lead with 286 new members, followed by referrals at 221, and digital channels close behind with 218 members.\n\nFrom a business perspective, this means that in-person visits remain the strongest driver of new memberships, highlighting the importance of maintaining an inviting and accessible physical presence. Referrals also play a significant role, indicating that satisfied customers are actively recommending FitLife to others, which is a valuable and cost-effective growth source. Digital marketing is nearly as effective as referrals, showing that online efforts are successfully attracting new members but may have room to grow further.\n\nOverall, these insights suggest that continuing to invest in walk-in experiences and referral programs will sustain strong membership growth, while optimizing digital marketing strategies could unlock additional opportunities to expand the member base.",
+    "level": 4
+  },
+  {
+    "question": "\"What is the average 'tenure_months' for members who signed up in January? Compare it with the average tenure of those who signed up in June.\"",
+    "sql_code": "SELECT \n    signup_month,\n    AVG(tenure_months) AS avg_tenure_months\nFROM (\n    SELECT \n        member_id,\n        STRFTIME('%m', signup_date) AS signup_month,\n        MAX(tenure_months) AS tenure_months\n    FROM \n        fitlife_members\n    GROUP BY \n        member_id, signup_month\n) \nWHERE signup_month IN ('01', '06')\nGROUP BY \n    signup_month;",
+    "is_ok": 0,
+    "timestamp": "2026-03-04T21:21:57.028202",
+    "answer": "Could not run query. Error: `Error executing SQL: Binder Error: Could not choose a best candidate function for the function call \"strftime(STRING_LITERAL, VARCHAR)\". In order to select one, please add explicit type casts.\n\tCandidate functions:\n\tstrftime(TIMESTAMP, VARCHAR) -> VARCHAR\n\tstrftime(TIMESTAMP_NS, VARCHAR) -> VARCHAR\n\tstrftime(TIMESTAMP WITH TIME ZONE, VARCHAR) -> VARCHAR\n\tstrftime(DATE, VARCHAR) -> VARCHAR\n\n\nLINE 7:         STRFTIME('%m', signup_date) AS signup_month,\n                ^\nTraceback (most recent call last):\n  File \"C:\\Users\\gerar\\Downloads\\gen_ia\\gen_ia\\process.py\", line 658, in run_query\n    result = conn.execute(sql).df()\n             ~~~~~~~~~~~~^^^^^\n_duckdb.BinderException: Binder Error: Could not choose a best candidate function for the function call \"strftime(STRING_LITERAL, VARCHAR)\". In order to select one, please add explicit type casts.\n\tCandidate functions:\n\tstrftime(TIMESTAMP, VARCHAR) -> VARCHAR\n\tstrftime(TIMESTAMP_NS, VARCHAR) -> VARCHAR\n\tstrftime(TIMESTAMP WITH TIME ZONE, VARCHAR) -> VARCHAR\n\tstrftime(DATE, VARCHAR) -> VARCHAR\n\n\nLINE 7:         STRFTIME('%m', signup_date) AS signup_month,\n                ^\n`",
+    "level": 4
+  },
+  {
+    "question": "\"Which 'center' s hves the top 3 highest percentage of members with a tenure longer than 12 months?\"",
+    "sql_code": "WITH member_tenure AS (\n    SELECT \n        center,\n        member_id,\n        MAX(tenure_months) AS max_tenure\n    FROM \n        fitlife_members\n    GROUP BY \n        center, member_id\n),\ncenter_stats AS (\n    SELECT \n        center,\n        COUNT(member_id) AS total_members,\n        SUM(CASE WHEN max_tenure > 12 THEN 1 ELSE 0 END) AS members_over_12_months\n    FROM \n        member_tenure\n    GROUP BY \n        center\n)\nSELECT \n    center,\n    CAST(members_over_12_months AS FLOAT) / total_members AS pct_members_over_12_months\nFROM \n    center_stats\nORDER BY \n    pct_members_over_12_months DESC\nLIMIT 3;",
+    "is_ok": 1,
+    "timestamp": "2026-03-04T21:30:28.996916",
+    "answer": "Query executed successfully.\n\nBusiness explanation:\nThe analysis identifies the top three FitLife centers with the highest proportion of members who have stayed longer than 12 months. These centers are Eastpark, Southgate, and Downtown.\n\nKey insights:\n- Eastpark leads with about 58% of its members having a tenure exceeding one year.\n- Southgate and Downtown follow closely, with approximately 57.6% and 56.5% respectively.\n- The differences between these centers are relatively small, indicating a consistent level of member retention among the top performers.\n\nBusiness implications:\n- These centers demonstrate strong member loyalty, which is crucial for stable revenue and long-term growth.\n- Understanding what drives retention at these locations\u2014such as customer service, facilities, or community engagement\u2014could provide valuable lessons to improve other centers.\n- Prioritizing resources and marketing efforts to replicate these successful retention strategies elsewhere may enhance overall membership longevity and profitability.\n\nIn summary, Eastpark, Southgate, and Downtown are leading in member retention beyond 12 months, highlighting them as benchmarks for sustaining long-term customer relationships within the FitLife network.",
+    "level": 4
+  },
+  {
+    "question": " **How many members change plans?** (Plan mobility rate)",
+    "sql_code": "WITH member_plans AS (\n    SELECT \n        member_id,\n        month,\n        plan,\n        ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY month) AS rn\n    FROM \n        fitlife_members\n),\nmember_plan_changes AS (\n    SELECT \n        a.member_id\n    FROM \n        member_plans a\n    JOIN \n        member_plans b\n    ON \n        a.member_id = b.member_id\n        AND a.rn = b.rn - 1\n    WHERE \n        a.plan != b.plan\n    GROUP BY \n        a.member_id\n)\nSELECT \n    COUNT(DISTINCT member_id) AS members_who_changed_plans\nFROM \n    member_plan_changes;",
+    "is_ok": 1,
+    "timestamp": "2026-03-04T21:32:24.151235",
+    "answer": "Query executed successfully.\n\nBusiness explanation:\nThe data shows that, based on the available records, no members have changed their plans over the observed period. In other words, the plan mobility rate is currently zero.\n\nFrom a business perspective, this means that members are either very satisfied with their initial plan choices or there may be barriers preventing them from switching plans. While stability can be positive, it also suggests limited flexibility or engagement with plan options.\n\nKey implications:\n- There may be an opportunity to encourage members to explore different plans that better fit their evolving needs, potentially increasing customer satisfaction and retention.\n- The lack of plan changes could indicate a need to review how easy it is for members to switch plans or to communicate the benefits of other plans more effectively.\n- Understanding why members are not switching can help tailor marketing and product strategies to boost plan mobility, which can drive revenue growth and improve member experience.\n\nIn summary, the business currently sees no plan switching activity, highlighting a potential area for strategic focus to enhance member engagement and optimize plan offerings.",
+    "level": 4
+  },
+  {
+    "question": "What is the churn rate by member tenure? (When do members typically churn?)",
+    "sql_code": "WITH churn_events AS (\n    SELECT \n        member_id,\n        MIN(tenure_months) AS churn_tenure\n    FROM \n        fitlife_members\n    WHERE \n        status = 'churned'\n    GROUP BY \n        member_id\n),\ntenure_counts AS (\n    SELECT \n        tenure_months,\n        COUNT(DISTINCT member_id) AS total_members\n    FROM \n        fitlife_members\n    GROUP BY \n        tenure_months\n),\nchurn_counts AS (\n    SELECT \n        churn_tenure AS tenure_months,\n        COUNT(DISTINCT member_id) AS churned_members\n    FROM \n        churn_events\n    GROUP BY \n        churn_tenure\n)\nSELECT \n    t.tenure_months,\n    COALESCE(c.churned_members, 0) AS churned_members,\n    t.total_members,\n    ROUND(COALESCE(c.churned_members, 0) * 1.0 / t.total_members, 4) AS churn_rate\nFROM \n    tenure_counts t\nLEFT JOIN \n    churn_counts c ON t.tenure_months = c.tenure_months\nORDER BY \n    t.tenure_months;",
+    "is_ok": 1,
+    "timestamp": "2026-03-04T21:39:35.846543",
+    "answer": "Query executed successfully.\n\nBusiness explanation:\nThe analysis of member churn by tenure reveals important insights about when members are most likely to leave FitLife.\n\nKey Findings:\n- The highest churn rates occur very early in the membership lifecycle, particularly within the first few months. For example, in month 1, about 5.3% of members churn, which is the peak churn rate observed.\n- After the initial months, the churn rate steadily declines, dropping to around 2.5% or lower from month 6 onward.\n- On average, the monthly churn rate across all tenures is about 2%, but this average masks the early spike in churn.\n- The total number of members tends to be higher in earlier months, reflecting new sign-ups, and decreases over time as members churn or continue their membership.\n\nBusiness Implications:\n- Early engagement is critical. Since most churn happens within the first 1-3 months, focusing on onboarding, member support, and value demonstration during this period could significantly reduce churn.\n- Retention efforts should prioritize new members to improve their initial experience and encourage longer-term commitment.\n- After the initial months, members tend to stay longer, so investing in programs that increase early satisfaction can have lasting benefits.\n- Monitoring churn trends by tenure helps allocate marketing and retention resources more effectively, targeting the periods with the highest risk.\n\nIn summary, FitLife should concentrate retention strategies on the early membership phase to reduce the high initial churn and improve overall member lifetime value.",
+    "level": 4
   }
 ]

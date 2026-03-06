@@ -4,6 +4,7 @@ plotly
 numpy
 openai
 duckdb
+pandasql
 matplotlib
 pytest
 
